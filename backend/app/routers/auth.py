@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Security
+from fastapi import APIRouter, Depends, HTTPException, status, Security, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
@@ -60,21 +60,37 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         # "user_id": user.id # User ID also not directly in Token schema
     }
 
-@router.post("/register/", response_model=schemas.UserSchema, tags=["authentication"]) # Changed response_model to UserSchema
-def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # User registration, open to anyone initially. Default role is PATIENT.
-    if user.email: # Check if email is provided
-        db_user_by_email = crud.get_user_by_email(db, email=user.email)
-        if db_user_by_email:
-            raise HTTPException(status_code=400, detail="Email already registered")
+@router.post("/register/", response_model=schemas.UserSchema, tags=["authentication"])
+async def register_user(request: Request, db: Session = Depends(get_db)):
+    body = await request.json()
+    if body:
+        print(f"Received user data: {body}")
     else:
-        # Handle case where email is not provided, if it's truly optional
-        # For now, let's assume email is required for registration for this check
-        pass # Or raise an error if email is mandatory for registration logic
-            
-    db_user_by_username = crud.get_user_by_username(db, username=user.username)
-    if db_user_by_username:
+        print("No user data received")
+        raise HTTPException(status_code=400, detail="Do not receive user data")
+    
+    user = schemas.UserCreate(username=body['username'],
+                              email=body['email'],  # Using email as username for registration
+                              full_name=body['full_name'],
+                              password=body['password'],
+                              role=models.UserRole.PATIENT)
+    try:
+        email = user.email.lower()
+        username = user.username.lower()
+        full_name = user.full_name.strip() if user.full_name else None
+        password = user.password
+        print(f"Registering user: {username}, email: {email}, full_name: {full_name}, password: {password}")
+    except AttributeError as e:
+        raise HTTPException(status_code=400, detail="Invalid user data format") from e
+
+
+    if not user.email:
+        raise HTTPException(status_code=400, detail="Email is required for registration")
+
+    if crud.get_user_by_email(db, email=user.email):
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    if crud.get_user_by_username(db, username=user.username):
         raise HTTPException(status_code=400, detail="Username already registered")
 
-    # The role is part of UserCreate schema. If not provided, model default (PATIENT) will be used.
     return crud.create_user(db=db, user=user)
