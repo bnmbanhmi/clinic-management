@@ -1,9 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { useNavigate } from 'react-router-dom'; // Import useNavigate
-
-// TODO: Import a translation function (e.g., from i18next)
-// import { useTranslation } from 'react-i18next';
+import { useNavigate, Link } from 'react-router-dom'; // Import useNavigate and Link
 
 const LoginPage: React.FC = () => {
     // const { t } = useTranslation(); // Initialize translation function
@@ -90,6 +87,9 @@ const LoginPage: React.FC = () => {
                 <button type="submit" disabled={loading} style={{ padding: '10px 15px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', fontSize: '16px' }}>
                     {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
                 </button>
+                <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                    <Link to="/forgot-password">Quên mật khẩu?</Link>
+                </div>
             </form>
         </div>
     );

@@ -14,6 +14,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     role = Column(SQLAlchemyEnum(UserRole), nullable=False, default=UserRole.PATIENT) 
     full_name = Column(String, nullable=True)
+    reset_password_token = Column(String, nullable=True, index=True, unique=True) # Added for password reset
+    reset_password_token_expires_at = Column(DateTime, nullable=True) # Added for password reset
     # Add other relevant fields for User
 
     __table_args__ = {'extend_existing': True}

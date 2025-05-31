@@ -39,6 +39,14 @@ class UserSchema(UserBase): # Renamed from User to UserSchema to avoid conflict 
 
     model_config = ConfigDict(from_attributes=True) # Updated for Pydantic v2
 
+# Password Recovery Schemas
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
 # Token Data Schema (for dependency)
 class TokenData(BaseModel):
     username: str # Changed from Optional[str] to str

@@ -3,6 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from passlib.context import CryptContext
 import enum
+import secrets # Add secrets for token generation
+from datetime import datetime, timedelta # Add datetime and timedelta
 from .config import settings
 
 DATABASE_URL = settings.DATABASE_URL

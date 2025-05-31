@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session
 from typing import Optional # Added Optional
 from . import models, schemas # Updated to schemas
 from .database import pwd_context, UserRole # Add this import
+import secrets
+from datetime import datetime, timedelta
 
 # User CRUD operations
 def get_user(db: Session, user_id: int):
@@ -49,6 +51,26 @@ def update_user(db: Session, user_id: int, user_update: schemas.UserUpdate):
     db.commit()
     db.refresh(db_user)
     return db_user
+
+def create_password_reset_token(db: Session, user: models.User) -> str:
+    token = secrets.token_urlsafe(32)
+    expires_delta = timedelta(hours=1) # Token valid for 1 hour
+    expires_at = datetime.utcnow() + expires_delta
+    setattr(user, 'reset_password_token', token)
+    setattr(user, 'reset_password_token_expires_at', expires_at)
+    db.commit()
+    db.refresh(user)
+    return token
+
+def get_user_by_reset_token(db: Session, token: str) -> Optional[models.User]:
+    return db.query(models.User).filter(models.User.reset_password_token == token).first()
+
+def reset_password(db: Session, user: models.User, new_password: str) -> bool:
+    setattr(user, 'hashed_password', pwd_context.hash(new_password))
+    setattr(user, 'reset_password_token', None) # Invalidate the token
+    setattr(user, 'reset_password_token_expires_at', None)
+    db.commit()
+    return True
 
 def delete_user(db: Session, user_id: int):
     db_user = db.query(models.User).filter(models.User.id == user_id).first()

@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import './App.css';
 import LoginPage from './components/LoginPage';
 import DashboardPage from './components/DashboardPage'; // Import DashboardPage
+import ForgotPasswordPage from './components/ForgotPasswordPage'; // Import ForgotPasswordPage
+import ResetPasswordPage from './components/ResetPasswordPage'; // Import ResetPasswordPage
 
 // A simple HOC for protected routes
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -16,6 +18,8 @@ function App() {
       <div className="App">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route 
             path="/dashboard" 
             element={
