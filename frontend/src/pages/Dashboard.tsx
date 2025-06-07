@@ -11,6 +11,7 @@ import PatientDashboard from '../components/dashboards/PatientDashboard';
 import StaffDashboard from '../components/dashboards/StaffDashboard';
 import AdminDashboard from '../components/dashboards/AdminDashboard';
 import BookAppointment from '../components/appointment/BookAppointment';
+import PatientSearch from '../components/patients/PatientSearch';
 
 type Props = {
   role: UserRole;
@@ -43,6 +44,7 @@ const Dashboard: React.FC<Props> = ({ role }) => {
       <Routes>
         <Route path="/" element={renderDashboard()} />
         <Route path="appointments/book" element={<BookAppointment />} />
+        <Route path="patients" element={<PatientSearch />} />
         {/* <Route path="appointments" element={<Appointments />} />
         <Route path="prescriptions" element={<Prescriptions />} />
         <Route path="records" element={<MedicalHistory />} /> */}

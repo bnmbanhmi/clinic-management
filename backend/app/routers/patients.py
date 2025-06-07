@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, cast
+from math import ceil
 
 from app import crud, models, schemas
 from app.database import get_db, UserRole
@@ -192,3 +193,48 @@ def update_patient_emr_summary_route( # Renamed to avoid conflict if any other u
         return db_patient # No update if summary is None
 
     return crud.update_patient_emr(db=db, patient_id=patient_id, emr_summary=emr_update.emr_summary)
+
+@router.post("/search", response_model=schemas.PatientSearchResponse)
+def search_patients(
+    search_params: schemas.PatientSearchQuery,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+):
+    """
+    Advanced patient search with multiple criteria and role-based access control.
+    
+    - **Doctors**: Can only search their assigned patients
+    - **Patients**: Can only search their own record  
+    - **Admin/Staff**: Can search all patients
+    
+    Supports searching by name, email, phone, ID, age ranges, and more.
+    """
+    current_user_role = current_user.role.value
+    current_user_id = cast(int, current_user.user_id)
+    
+    # Get search results with total count
+    patients, total_count = crud.search_patients(
+        db=db,
+        search_params=search_params,
+        current_user_role=current_user_role,
+        current_user_id=current_user_id
+    )
+    
+    # Convert to search result format with computed fields
+    patient_results = []
+    for patient in patients:
+        search_result = crud.get_patient_search_result(db=db, patient=patient)
+        patient_results.append(search_result)
+    
+    # Calculate pagination info
+    per_page = search_params.limit
+    current_page = (search_params.skip // per_page) + 1
+    total_pages = ceil(total_count / per_page) if per_page > 0 else 1
+    
+    return schemas.PatientSearchResponse(
+        patients=patient_results,
+        total_count=total_count,
+        page=current_page,
+        per_page=per_page,
+        total_pages=total_pages
+    )

@@ -63,23 +63,33 @@ def create_user(db: Session, user: schemas.UserCreate) -> models.User:
         )
         db.add(db_user)
         db.flush()  # Get db_user.user_id without committing yet
+        db.refresh(db_user)  # Refresh to ensure all attributes are populated
+
+        # Extract values using getattr to resolve type checker issues
+        user_id_value = getattr(db_user, 'user_id', 0)
+        full_name_value = getattr(db_user, 'full_name', 'Unknown')
 
         # Create role-specific records based on user role
         if user.role == "PATIENT":
             patient_in = schemas.PatientCreate(
-                patient_id=db_user.user_id,
-                full_name=db_user.full_name,
-                assigned_doctor_id=10  # TODO: Make this configurable instead of hardcoded
+                patient_id=user_id_value,  # Use user_id as patient_id for linking
+                user_id=user_id_value,     # Link to User table
+                full_name=full_name_value,  # Required field from PatientBase
+                date_of_birth=date(2000, 1, 1),  # Default date
+                gender=Gender.MALE.value,  # Use Gender enum value
+                address="",  # Default empty address
+                phone_number="",  # Default empty phone (correct field name)
+                assigned_doctor_id=None  # No doctor assigned initially
             )
-            create_patient(db=db, patient_in=patient_in, creator_id=db_user.user_id)
+            create_patient(db=db, patient_in=patient_in, creator_id=user_id_value)
 
         elif user.role == "DOCTOR":
             doctor_in = schemas.DoctorCreate(
-                doctor_id=db_user.user_id,
-                doctor_name=db_user.full_name,
+                doctor_id=user_id_value,
+                doctor_name=full_name_value,
                 hospital_id=1  # TODO: Make this configurable instead of hardcoded
             )
-            create_doctor(db=db, doctor_in=doctor_in, creator_id=db_user.user_id)
+            create_doctor(db=db, doctor_in=doctor_in, creator_id=user_id_value)
 
         elif user.role == "CLINIC_STAFF":
             # No additional records needed for clinic staff currently
@@ -264,6 +274,164 @@ def delete_patient(db: Session, patient_id: int) -> Optional[models.Patient]:
     db.commit()
     return db_patient
 
+
+def search_patients(
+    db: Session, 
+    search_params: schemas.PatientSearchQuery, 
+    current_user_role: str,
+    current_user_id: int
+) -> tuple[List[models.Patient], int]:
+    """
+    Advanced patient search with multiple filters and role-based access control.
+    
+    Returns:
+        tuple: (list_of_patients, total_count)
+    """
+    from sqlalchemy import and_, or_, func, desc, asc
+    from datetime import date
+    
+    # Base query with joins
+    query = db.query(models.Patient).join(
+        models.User, models.Patient.patient_id == models.User.user_id
+    ).outerjoin(
+        models.Doctor, models.Patient.assigned_doctor_id == models.Doctor.doctor_id
+    )
+    
+    # Role-based access control
+    if current_user_role == UserRole.DOCTOR.value:
+        # Doctors can only see their assigned patients
+        query = query.filter(models.Patient.assigned_doctor_id == current_user_id)
+    elif current_user_role == UserRole.PATIENT.value:
+        # Patients can only see their own record
+        query = query.filter(models.Patient.patient_id == current_user_id)
+    # ADMIN and CLINIC_STAFF can see all patients (no additional filter)
+    
+    # Build search conditions
+    conditions = []
+    
+    # General search query (searches across multiple fields)
+    if search_params.query:
+        search_term = f"%{search_params.query}%"
+        general_search = or_(
+            models.Patient.full_name.ilike(search_term),
+            models.User.email.ilike(search_term),
+            models.Patient.phone_number.ilike(search_term),
+            models.Patient.identification_id.ilike(search_term),
+            models.Patient.health_insurance_card_no.ilike(search_term)
+        )
+        conditions.append(general_search)
+    
+    # Specific field searches
+    if search_params.patient_id:
+        conditions.append(models.Patient.patient_id == search_params.patient_id)
+    
+    if search_params.full_name:
+        conditions.append(models.Patient.full_name.ilike(f"%{search_params.full_name}%"))
+    
+    if search_params.phone_number:
+        conditions.append(models.Patient.phone_number.ilike(f"%{search_params.phone_number}%"))
+    
+    if search_params.email:
+        conditions.append(models.User.email.ilike(f"%{search_params.email}%"))
+    
+    if search_params.identification_id:
+        conditions.append(models.Patient.identification_id.ilike(f"%{search_params.identification_id}%"))
+    
+    if search_params.health_insurance_card_no:
+        conditions.append(models.Patient.health_insurance_card_no.ilike(f"%{search_params.health_insurance_card_no}%"))
+    
+    if search_params.assigned_doctor_id:
+        conditions.append(models.Patient.assigned_doctor_id == search_params.assigned_doctor_id)
+    
+    if search_params.gender:
+        conditions.append(models.Patient.gender == search_params.gender)
+    
+    # Age filters (calculate age from date_of_birth)
+    if search_params.age_min or search_params.age_max:
+        today = date.today()
+        
+        if search_params.age_min:
+            max_birth_date = date(today.year - search_params.age_min, today.month, today.day)
+            conditions.append(models.Patient.date_of_birth <= max_birth_date)
+        
+        if search_params.age_max:
+            min_birth_date = date(today.year - search_params.age_max - 1, today.month, today.day)
+            conditions.append(models.Patient.date_of_birth > min_birth_date)
+    
+    # Apply all conditions
+    if conditions:
+        query = query.filter(and_(*conditions))
+    
+    # Get total count before pagination
+    total_count = query.count()
+    
+    # Sorting
+    sort_by = search_params.sort_by or "full_name"
+    if hasattr(models.Patient, sort_by):
+        sort_field = getattr(models.Patient, sort_by)
+    else:
+        sort_field = models.Patient.full_name
+        
+    if search_params.sort_order == "desc":
+        query = query.order_by(desc(sort_field))
+    else:
+        query = query.order_by(asc(sort_field))
+    
+    # Pagination
+    patients = query.offset(search_params.skip).limit(search_params.limit).all()
+    
+    return patients, total_count
+
+
+def get_patient_search_result(db: Session, patient: models.Patient) -> schemas.PatientSearchResult:
+    """
+    Convert a Patient model to PatientSearchResult schema with additional computed fields.
+    """
+    from datetime import date
+    
+    # Calculate age
+    age = None
+    if hasattr(patient, 'date_of_birth') and patient.date_of_birth is not None:
+        today = date.today()
+        birth_date = patient.date_of_birth
+        age = today.year - birth_date.year
+        if today.month < birth_date.month or (
+            today.month == birth_date.month and today.day < birth_date.day
+        ):
+            age -= 1
+    
+    # Get assigned doctor name
+    assigned_doctor_name = None
+    assigned_doctor_id = getattr(patient, 'assigned_doctor_id', None)
+    if assigned_doctor_id is not None:
+        doctor = get_doctor(db, assigned_doctor_id)
+        if doctor:
+            assigned_doctor_name = getattr(doctor, 'doctor_name', None)
+    
+    # Get user email
+    patient_id = getattr(patient, 'patient_id')
+    user = get_user(db, patient_id)
+    email = getattr(user, 'email', None) if user else None
+    
+    # Get gender value
+    gender_value = None
+    if hasattr(patient, 'gender') and patient.gender is not None:
+        gender_value = patient.gender.value if hasattr(patient.gender, 'value') else str(patient.gender)
+    
+    return schemas.PatientSearchResult(
+        patient_id=getattr(patient, 'patient_id'),
+        full_name=getattr(patient, 'full_name'),
+        date_of_birth=getattr(patient, 'date_of_birth', None),
+        gender=gender_value,
+        phone_number=getattr(patient, 'phone_number', None),
+        email=email,
+        identification_id=getattr(patient, 'identification_id', None),
+        health_insurance_card_no=getattr(patient, 'health_insurance_card_no', None),
+        assigned_doctor_id=assigned_doctor_id,
+        assigned_doctor_name=assigned_doctor_name,
+        age=age
+    )
+
 # ============================================================================
 # APPOINTMENT CRUD OPERATIONS
 # ============================================================================
@@ -347,11 +515,11 @@ def get_available_slots_in_a_day(db: Session, day: date) -> List[schemas.Availab
         # Find doctors available at this time
         free_doctors = [
             schemas.AvailableDoctor(
-                doctor_id=doctor.doctor_id,
-                doctor_name=doctor.doctor_name
+                doctor_id=getattr(doctor, 'doctor_id'),
+                doctor_name=getattr(doctor, 'doctor_name')
             )
             for doctor in doctors
-            if (doctor.doctor_id, current_time.time()) not in taken_slots
+            if (getattr(doctor, 'doctor_id'), current_time.time()) not in taken_slots
         ]
 
         # Add slot if there are available doctors
